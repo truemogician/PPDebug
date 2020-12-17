@@ -25,7 +25,7 @@
   + 参数：
 
     ```ts
-    mail: string
+    email: string
     ```
   + 返回：
 
