@@ -1,5 +1,5 @@
 import { Column, Entity, JoinColumn, OneToMany, OneToOne } from "typeorm"
-import { CodeRevision } from "./Revision"
+import { SourceRevision } from "./Revision"
 import { Source } from "./Source"
 
 @Entity()
@@ -12,11 +12,6 @@ export class Code {
     @JoinColumn()
     source: Source
 
-    @Column()
+    @Column("mediumtext")
     code: string
-
-    @OneToMany(type => CodeRevision, revision => revision.target, {
-        persistence: false,
-    })
-    readonly revisions?: CodeRevision[]
 }

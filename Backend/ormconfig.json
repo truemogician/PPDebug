@@ -6,7 +6,7 @@
    "password": "qscaxzProject_Database=0",
    "database": "compare_judger",
    "synchronize": true,
-   "logging": true,
+   "logging": false,
    "entities": [
       "src/entity/**/*.ts"
    ],

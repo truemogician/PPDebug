@@ -12,7 +12,7 @@ export class Log {
     @PrimaryGeneratedColumn({type:"bigint"})
     id: string;
 
-    @Column({ type:"longtext", nullable: true })
+    @Column({ type:"text", nullable: true })
     detail?: string;
 
     @ManyToOne(type => User, user => user.logs, {

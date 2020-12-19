@@ -10,10 +10,10 @@ export class Problem {
     @PrimaryGeneratedColumn()
     id: number
 
-    @Column()
+    @Column("tinytext")
     title: string
 
-    @Column("longtext")
+    @Column("mediumtext")
     description: string
 
     @ManyToMany(type => Tag, tag => tag.problems, {
@@ -29,11 +29,11 @@ export class Problem {
     @Column({ default: 0 })
     voteDown: number
 
-    @ManyToOne(type => User, user => user.createdProblems, {
+    @ManyToOne(type => User, user => user.problems, {
         nullable: false,
         persistence: false
     })
-    readonly creator: User
+    readonly author: User
 
     @ManyToMany(type => User, user => user.contributedProblems, {
         persistence: false

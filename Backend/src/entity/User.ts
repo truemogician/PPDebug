@@ -1,8 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany, ManyToMany } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany, ManyToMany, OneToOne } from "typeorm";
 import { SourceComment, ProblemComment } from "./Comment";
 import { Judgement } from "./Judgement";
 import { Log } from "./Log"
 import { Problem } from "./Problem";
+import { Session } from "./Session";
+import { Source } from "./Source";
 import { Tag } from "./Tag";
 
 export enum Gender {
@@ -14,25 +16,25 @@ export class User {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @Column({length:32})
+    @Column({ length: 32 })
     username: string;
 
-    @Column({length:32})
+    @Column({ length: 32 })
     password: string;
 
     @Column({ default: false })
     administrator: boolean;
 
-    @Column({ length:64,unique: true })
+    @Column({ length: 64, unique: true })
     email: string;
 
-    @Column({ nullable: true })
+    @Column({ type: "mediumtext", nullable: true })
     avator?: string;
 
     @Column({ nullable: true })
     phone?: number;
 
-    @Column({ length:12, nullable: true })
+    @Column({ length: 12, nullable: true })
     qq?: string;
 
     @Column({ type: "enum", enum: Gender, default: Gender.Secret })
@@ -47,6 +49,12 @@ export class User {
     @Column({ nullable: true })
     dropDate?: Date;
 
+    @OneToOne(type => Session, session => session.user, {
+        eager: true,
+        persistence: false
+    })
+    readonly session?: Session;
+
     @OneToMany(type => Log, log => log.user, {
         persistence: false,
     })
@@ -57,10 +65,20 @@ export class User {
     })
     readonly judgements?: Judgement[]
 
-    @OneToMany(type => Problem, problem => problem.creator, {
-        persistence: false,
+    @OneToMany(type=>Source,source=>source.author,{
+        persistence:false
     })
-    readonly createdProblems?: Problem[]
+    readonly sources:Source[]
+
+    @ManyToMany(type => Source, source => source.contributors, {
+        persistence: false
+    })
+    readonly contributedSources?: Source[]
+
+    @OneToMany(type => Problem, problem => problem.author, {
+        persistence: false
+    })
+    readonly problems?: Problem[]
 
     @ManyToMany(type => Problem, problem => problem.contributors, {
         persistence: false
@@ -82,12 +100,12 @@ export class User {
     })
     readonly sourceComments?: SourceComment[]
 
-    @OneToMany(type => ProblemComment, comment=>comment.remindees, {
+    @OneToMany(type => ProblemComment, comment => comment.remindees, {
         persistence: false
     })
     readonly problemReminders?: ProblemComment[]
 
-    @OneToMany(type => SourceComment, comment=>comment.remindees, {
+    @OneToMany(type => SourceComment, comment => comment.remindees, {
         persistence: false
     })
     readonly sourceReminders?: ProblemComment[]

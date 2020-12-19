@@ -1,4 +1,4 @@
-/*import { LogType } from "./entity/Log"
+import { LogType } from "./entity/Log"
 export namespace LogDetail {
     export interface Login {
         failReason?: string
@@ -57,5 +57,4 @@ export namespace LogDetail {
     }
 }
 export class LogParser {
-
-}*/
+}

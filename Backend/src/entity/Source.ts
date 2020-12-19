@@ -3,6 +3,8 @@ import { Code } from "./Code"
 import { SourceComment } from "./Comment"
 import { Judgement } from "./Judgement"
 import { Problem } from "./Problem"
+import { SourceRevision } from "./Revision"
+import { User } from "./User"
 
 export enum SourceType {
     Datamaker, StandardProgram, JudgedProgram, SpecialJudger
@@ -22,10 +24,10 @@ export class Source {
     @Column({ type: "enum", enum: SourceLanguage })
     language: SourceLanguage
 
-    @Column({ nullable: true })
+    @Column({ type: "tinytext", nullable: true })
     languageStandard?: string
 
-    @Column()
+    @Column("tinytext")
     compiler: string
 
     @Column({ default: 0 })
@@ -42,6 +44,22 @@ export class Source {
 
     @OneToMany(type => SourceComment, comment => comment.source)
     comments?: SourceComment[]
+
+    @OneToMany(type => SourceRevision, revision => revision.target, {
+        persistence: false
+    })
+    readonly revisions?: SourceRevision[]
+
+    @ManyToOne(type => User, user => user.sources, {
+        nullable: false,
+        persistence: false
+    })
+    author: User
+
+    @ManyToMany(type => User, user => user.contributedSources, {
+        persistence: false
+    })
+    readonly contributors?: User[]
 
     @ManyToOne(type => Problem, problem => problem.sources, {
         persistence: false,

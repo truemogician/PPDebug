@@ -7,7 +7,7 @@ abstract class Comment {
     @PrimaryGeneratedColumn()
     id: number
 
-    @Column()
+    @Column({type:"text"})
     content: string
 
     @Column({ default: 0 })

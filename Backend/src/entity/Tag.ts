@@ -1,18 +1,15 @@
-import {Column, Entity, ManyToMany, ManyToOne, PrimaryGeneratedColumn} from "typeorm"
+import {Column, Entity, ManyToMany, ManyToOne, PrimaryColumn, PrimaryGeneratedColumn} from "typeorm"
 import { Problem } from "./Problem"
 import { ProblemRevision } from "./Revision"
 import { User } from "./User"
 
 @Entity()
 export class Tag{
-    @PrimaryGeneratedColumn()
-    id:number
-
-    @Column({unique:true})
+    @PrimaryColumn({type:"varchar",length:16})
     name:string
 
-    @Column({nullable:true})
-    discription:string
+    @Column({type:"tinytext", nullable:true})
+    discription?:string
 
     @ManyToOne(type=>User,user=>user.createdTags,{
         nullable:false,

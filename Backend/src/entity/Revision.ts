@@ -1,6 +1,7 @@
 import { Column, Entity, JoinTable, ManyToMany, ManyToOne, PrimaryGeneratedColumn } from "typeorm"
 import { Code } from "./Code"
 import { Problem } from "./Problem"
+import { Source } from "./Source"
 import { Tag } from "./Tag"
 
 @Entity()
@@ -13,7 +14,7 @@ export class ProblemRevision {
     })
     target: Problem
 
-    @Column({ nullable: true })
+    @Column({ type:"mediumtext", nullable: true })
     description?: string
 
     @ManyToMany(type => Tag, tag => tag.problemRevisions, {
@@ -25,15 +26,15 @@ export class ProblemRevision {
 }
 
 @Entity()
-export class CodeRevision {
+export class SourceRevision {
     @PrimaryGeneratedColumn()
     id: number
 
-    @ManyToOne(type => Code, code => code.revisions, {
+    @ManyToOne(type => Source, source => source.revisions, {
         nullable: false,
     })
-    target: Code
+    target: Source
 
-    @Column()
+    @Column("mediumtext")
     code: string
 }
