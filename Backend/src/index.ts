@@ -297,7 +297,7 @@ Database.create().then(database => {
             ["qq", String, true, /^[0-9]{6,12}$/]))
             response.status(400).send("Syntax error");
         else {
-            let metadata = response.locals.session.metadata ? JSON.parse(response.locals.session.metadata) : {};
+            const metadata = response.locals.session.metadata ? JSON.parse(response.locals.session.metadata) : {};
             if (metadata.mailTime && Date.now() > metadata.mailTime + 600000) {
                 delete metadata.verificationCode;
                 delete metadata.mailTime;
@@ -310,9 +310,16 @@ Database.create().then(database => {
             else if (metadata.verificationCode != payload.verificationCode)
                 response.status(403).send("Wrong verification code");
             else {
-                let newUser = new User();
-                leftJoin(newUser, payload);
+                const newUser = new User();
+                newUser.username=payload.username;
+                newUser.password=payload.password;
+                newUser.email=payload.email;
                 database.getTable(User).save(newUser).then(user => {
+                    delete metadata.verificationCode;
+                    delete metadata.mailTime;
+                    response.locals.session.user=user;
+                    response.locals.session.metadata=JSON.stringify(metadata);
+                    database.sessions.update(response.locals.session);
                     response.status(201).json({
                         id: user.id
                     });
