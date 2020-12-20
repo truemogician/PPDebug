@@ -45,10 +45,10 @@ export class MailTemplate{
                                                     <a style=" color:  #153643; text-decoration: underline">${target}</a>
                                                 </td>
                                             </tr>
-                                            <tr style="color: #153643; font-family: STSong, sans-serif; font-size: 16px; line-height: 25px; ">
-                                                <td width="60px" style="float:left">尊敬的debugger</td>
+                                            <tr style="color: #153643; font-family: STSong, sans-serif; font-size: 17.5px; line-height: 25px; ">
+                                                <td width="80px" style="float:left">尊敬的debugger</td>
                                             </tr>
-                                            <tr style="color: #153643; font-family: STSong, sans-serif; font-size: 16px; line-height: 25px;">
+                                            <tr style="color: #153643; font-family: STSong, sans-serif; font-size: 17.5px; line-height: 25px;">
                                                 <td>
                                                     感谢您注册PPDebug！<br>
                                                     请使用此代码来验证此电子邮箱属于您，进而完成注册。

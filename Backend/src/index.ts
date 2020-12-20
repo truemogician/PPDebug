@@ -132,7 +132,7 @@ Database.create().then(database => {
         })
     })
 
-    app.post("/api/user/sendEmail", (request, response) => {
+    app.post("/api/user/sendEmail", async (request, response) => {
         const query = request.query;
         let metadata = response.locals.session.metadata;
         metadata = metadata ? JSON.parse(metadata) : {};
@@ -140,7 +140,9 @@ Database.create().then(database => {
             response.status(429).json({
                 timeLeft: 60000 + metadata.mailTime - Date.now(),
             });
-        else if (/^\S+@[a-zA-Z0-9]+\.[a-zA-Z]+$/.test(query.email as string)) {
+        else if (/^\S+@([a-zA-Z0-9]+\.)+[a-zA-Z]+$/.test(query.email as string)) {
+            if (await database.getTable(User).findOne({where: {email: query.email as string}}))
+                response.status(403).send("Email address already registered");
             const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
             let verificationCode: string;
             do {
