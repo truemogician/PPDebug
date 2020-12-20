@@ -8,7 +8,10 @@ import { Source } from "./Source";
 import { Tag } from "./Tag";
 
 export enum Gender {
-    Male, Female, Other, Secret
+    Male = "Male",
+    Female = "Female",
+    Other = "Other",
+    Secret = "Secret",
 }
 
 @Entity()
@@ -65,10 +68,10 @@ export class User {
     })
     readonly judgements?: Judgement[]
 
-    @OneToMany(type=>Source,source=>source.author,{
-        persistence:false
+    @OneToMany(type => Source, source => source.author, {
+        persistence: false
     })
-    readonly sources:Source[]
+    readonly sources?: Source[]
 
     @ManyToMany(type => Source, source => source.contributors, {
         persistence: false

@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { Connection, createConnection, DeleteResult, UpdateResult } from "typeorm";
+import { Connection, createConnection, EntityTarget, Repository } from "typeorm";
 import { User } from "./entity/User"
 import { Session } from "./entity/Session"
 
@@ -72,5 +72,8 @@ export default class Database {
         manager.connection = await createConnection();
         manager.sessions = new SessionManager(manager.connection);
         return manager;
+    }
+    getTable<Entity>(target: EntityTarget<Entity>): Repository<Entity>{
+        return this.connection.getRepository(target);
     }
 }

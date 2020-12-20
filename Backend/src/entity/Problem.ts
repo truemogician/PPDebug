@@ -33,7 +33,7 @@ export class Problem {
         nullable: false,
         persistence: false
     })
-    readonly author: User
+    author: User
 
     @ManyToMany(type => User, user => user.contributedProblems, {
         persistence: false
