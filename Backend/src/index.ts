@@ -145,7 +145,6 @@ Database.create().then(database => {
             payload: request.body,
             cookies: request.cookies,
         });
-        response.header("Access-Control-Allow-Origin","*");
         if (!request.cookies?.sessionId) {
             const session = await database.sessions.add();
             response.cookie("sessionId", session.id);
