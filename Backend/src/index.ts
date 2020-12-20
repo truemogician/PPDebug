@@ -1,128 +1,16 @@
 import express = require('express');
-import clone = require('lodash.clonedeep');
 import cookieParser = require('cookie-parser');
 import bodyParser = require('body-parser');
-import multer = require('multer');
-import fileSystem=require('fs');
+import fileSystem = require('fs');
 import nodemailer = require('nodemailer');
 import Database from "./database"
 import { User } from './entity/User';
-import SMTPTransport = require('nodemailer/lib/smtp-transport');
 import { Problem } from './entity/Problem';
+import { hasKeys, leftJoin, rightJoin, satisfyConstraints } from './verification';
+import { MailTemplate, sourceUpload } from './configuration';
+import Mail = require('nodemailer/lib/mailer');
 
-function hasKeys(dst: object, ...keys: string[]): boolean {
-    const existedKeys = Object.keys(dst);
-    for (const key of keys) {
-        if (!existedKeys.includes(key))
-            return false;
-    }
-    return true;
-}
-type FullConstraint = [string, Function, boolean?];
-type PartialConstraint = [string, boolean?];
-function hasKeysWithTypes(dst: object, ...keysAndTypes: FullConstraint[]): boolean;
-function hasKeysWithTypes(dst: object, type: Function, ...keys: (PartialConstraint | string)[]): boolean;
-function hasKeysWithTypes(dst: object, ...params: any[]): boolean {
-    const existedKeys = Object.keys(dst);
-    if (params[0] instanceof Function) {
-        const type = params[0] as Function;
-        for (let i = 1; i < params.length; ++i) {
-            if (typeof params[i] == "string") {
-                if (!existedKeys.includes(params[i]) || dst[params[i]].constructor != type)
-                    return false;
-            }
-            else {
-                const key = params[i] as PartialConstraint;
-                if (existedKeys.includes(key[0])) {
-                    if (dst[key[0]].constructor != type)
-                        return false;
-                }
-                else if (!params[1])
-                    return false;
-            }
-        }
-        return true;
-    }
-    else {
-        for (const keyAndType of params) {
-            if (existedKeys.includes(keyAndType[0])) {
-                if (dst[keyAndType[0]].constructor != keyAndType[1])
-                    return false;
-            }
-            else if (!params[2])
-                return false;
-        }
-        return true;
-    }
-}
-type Constraint = [string, Function, (boolean | RegExp)?, RegExp?];
-function satisfyConstraints(obj: object, ...constraints: Constraint[]) {
-    const keys = Object.keys(obj);
-    for (const constraint of constraints) {
-        if (keys.includes(constraint[0])) {
-            const value = obj[constraint[0]];
-            if (value.constructor != constraint[1])
-                return false;
-            else if (constraint[2]) {
-                if (constraint[2] instanceof RegExp &&
-                    !constraint[2].test(typeof value == "string" ? value : value.toString()))
-                    return false;
-                else if (constraint[3] &&
-                    !constraint[3].test(typeof value == "string" ? value : value.toString()))
-                    return false;
-            }
-        }
-        else if (constraint[2] !== true)
-            return false;
-    }
-    return true;
-}
-function leftJoin(dst: object, target: object, typeSafe = true): void {
-    const dstKeys = Object.keys(dst);
-    const srcKeys = Object.keys(target);
-    for (const key of dstKeys) {
-        if (srcKeys.includes(key) && (!typeSafe || dst[key].constructor == target[key].constructor))
-            dst[key] = clone(target[key]);
-    }
-}
-function rightJoin(dst: object, target: object, typeSafe = true): void {
-    const dstKeys = Object.keys(dst);
-    const srcKeys = Object.keys(target);
-    for (const key of srcKeys) {
-        if (!dstKeys.includes(key) || !typeSafe || dst[key].constructor == target[key].constructor)
-            dst[key] = clone(target[key]);
-    }
-}
 let int = Number.parseInt;
-let mailConfig: SMTPTransport.Options = {
-    host: "smtp.exmail.qq.com",
-    port: 465,
-    secure: true,
-    auth: {
-        user: "ppdebug@truemogician.com",
-        pass: "EUPHFqvJM9MhSZeT"
-    }
-}
-let sourceUpload = multer({
-    storage: multer.diskStorage({
-        destination: (_req, _file, cb) => cb(null, "upload/source"),
-        filename: (_req, file, cb) => cb(null, file.fieldname + '-' + Date.now())
-    }),
-    limits: {
-        fileSize: 524288,
-        files: 1,
-    }
-})
-let avatorUpload = multer({
-    storage: multer.diskStorage({
-        destination: (_req, _file, cb) => cb(null, "upload/avator"),
-        filename: (_req, file, cb) => cb(null, file.fieldname + '-' + Date.now())
-    }),
-    limits: {
-        fileSize: 2097152,
-        files: 1,
-    },
-})
 Database.create().then(database => {
     const app: express.Application = express();
     const guestAvailabelUrl: string[] = [
@@ -130,7 +18,7 @@ Database.create().then(database => {
         "/user/login",
         "/user/sendEmail",
         "/user/register",
-        
+
         "/source/upload",
     ];
 
@@ -253,7 +141,6 @@ Database.create().then(database => {
                 timeLeft: 60000 + metadata.mailTime - Date.now(),
             });
         else if (/^\S+@[a-zA-Z0-9]+\.[a-zA-Z]+$/.test(query.email as string)) {
-            const transporter = nodemailer.createTransport(mailConfig);
             const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
             let verificationCode: string;
             do {
@@ -261,11 +148,13 @@ Database.create().then(database => {
                 for (let i = 0; i < 4; ++i)
                     verificationCode += charset.charAt(Math.floor(Math.random() * charset.length));
             } while (verificationCode.length != 4);
-            const mailOptions = {
-                from: mailConfig.auth.user,
+            const mail = new MailTemplate(query.email as string, verificationCode)
+            const transporter = nodemailer.createTransport(mail.config);
+            const mailOptions: Mail.Options = {
+                from: mail.config.auth.user,
                 to: query.email as string,
                 subject: "PPDEBUG 验证邮件",
-                text: `您的验证码是 : ${verificationCode}，请于10分钟内完成注册`,
+                html: mail.content,
             };
             transporter.sendMail(mailOptions, (error, info) => {
                 if (error) {
@@ -305,20 +194,22 @@ Database.create().then(database => {
                 database.sessions.update(response.locals.session);
                 response.status(403).send("Verification code expired");
             }
+            else if (response.locals.session.user)
+                response.status(400).send("User already logged in");
             else if (!metadata.verificationCode)
                 response.status(400).send("Verification email not sent")
             else if (metadata.verificationCode != payload.verificationCode)
                 response.status(403).send("Wrong verification code");
             else {
                 const newUser = new User();
-                newUser.username=payload.username;
-                newUser.password=payload.password;
-                newUser.email=payload.email;
+                newUser.username = payload.username;
+                newUser.password = payload.password;
+                newUser.email = payload.email;
                 database.getTable(User).save(newUser).then(user => {
                     delete metadata.verificationCode;
                     delete metadata.mailTime;
-                    response.locals.session.user=user;
-                    response.locals.session.metadata=JSON.stringify(metadata);
+                    response.locals.session.user = user;
+                    response.locals.session.metadata = JSON.stringify(metadata);
                     database.sessions.update(response.locals.session);
                     response.status(201).json({
                         id: user.id
@@ -351,19 +242,19 @@ Database.create().then(database => {
     });
 
     app.post("/api/source/upload", (request, response) => {
-        sourceUpload.single("source")(request,response,error=>{
+        sourceUpload.single("source")(request, response, error => {
             if (error)
                 response.status(500).send("Uploading failed for unknown reason");
-            else{
-                const params=request.query;
-                const payload=request.body;
+            else {
+                const params = request.query;
+                const payload = request.body;
                 if (!satisfyConstraints(payload,
-                    ["language",String],
-                    ["languageStandard",String,true],
-                    ["compiler",String]))
+                    ["language", String],
+                    ["languageStandard", String, true],
+                    ["compiler", String]))
                     response.status(400).send("Payload syntax error");
-                else{
-                    let stream=fileSystem.createReadStream(request.file.path);
+                else {
+                    let stream = fileSystem.createReadStream(request.file.path);
                     console.log(stream);
                 }
             }
