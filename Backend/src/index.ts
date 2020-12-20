@@ -281,7 +281,9 @@ Database.create().then(database => {
                 database.sessions.update(response.locals.session);
                 response.status(403).send("Verification code expired");
             }
-            else if (metadata.verificationCode && metadata.verificationCode != payload.verificationCode)
+            else if (!metadata.verificationCode)
+                response.status(400).send("Verification email not sent")
+            else if (metadata.verificationCode != payload.verificationCode)
                 response.status(403).send("Wrong verification code");
             else {
                 let newUser = new User();
