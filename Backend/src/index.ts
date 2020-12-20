@@ -3,6 +3,7 @@ import clone = require('lodash.clonedeep');
 import cookieParser = require('cookie-parser');
 import bodyParser = require('body-parser');
 import multer = require('multer');
+import fileSystem=require('fs');
 import nodemailer = require('nodemailer');
 import Database from "./database"
 import { User } from './entity/User';
@@ -102,6 +103,26 @@ let mailConfig: SMTPTransport.Options = {
         pass: "EUPHFqvJM9MhSZeT"
     }
 }
+let sourceUpload = multer({
+    storage: multer.diskStorage({
+        destination: (_req, _file, cb) => cb(null, "upload/source"),
+        filename: (_req, file, cb) => cb(null, file.fieldname + '-' + Date.now())
+    }),
+    limits: {
+        fileSize: 524288,
+        files: 1,
+    }
+})
+let avatorUpload = multer({
+    storage: multer.diskStorage({
+        destination: (_req, _file, cb) => cb(null, "upload/avator"),
+        filename: (_req, file, cb) => cb(null, file.fieldname + '-' + Date.now())
+    }),
+    limits: {
+        fileSize: 2097152,
+        files: 1,
+    },
+})
 Database.create().then(database => {
     const app: express.Application = express();
     const guestAvailabelUrl: string[] = [
@@ -109,9 +130,12 @@ Database.create().then(database => {
         "/user/login",
         "/user/sendEmail",
         "/user/register",
+        
+        "/source/upload",
     ];
 
     app.enable("trust proxy");
+
     app.use("/api", cookieParser(), bodyParser.json(), async (request, response, next) => {
         console.log({
             time: new Date(),
@@ -224,9 +248,9 @@ Database.create().then(database => {
         const query = request.query;
         let metadata = response.locals.session.metadata;
         metadata = metadata ? JSON.parse(metadata) : {};
-        if (metadata.mailTime && Date.now() < int(metadata.mailTime) + 60000)
+        if (metadata.mailTime && Date.now() < metadata.mailTime + 60000)
             response.status(429).json({
-                timeLeft: 60000 + int(metadata.mailTime) - Date.now(),
+                timeLeft: 60000 + metadata.mailTime - Date.now(),
             });
         else if (/^\S+@[a-zA-Z0-9]+\.[a-zA-Z]+$/.test(query.email as string)) {
             const transporter = nodemailer.createTransport(mailConfig);
@@ -319,8 +343,24 @@ Database.create().then(database => {
         }
     });
 
-    app.post("/api/source/upload",(request,response)=>{
-        
+    app.post("/api/source/upload", (request, response) => {
+        sourceUpload.single("source")(request,response,error=>{
+            if (error)
+                response.status(500).send("Uploading failed for unknown reason");
+            else{
+                const params=request.query;
+                const payload=request.body;
+                if (!satisfyConstraints(payload,
+                    ["language",String],
+                    ["languageStandard",String,true],
+                    ["compiler",String]))
+                    response.status(400).send("Payload syntax error");
+                else{
+                    let stream=fileSystem.createReadStream(request.file.path);
+                    console.log(stream);
+                }
+            }
+        })
     })
 
     app.put("/api/user/modify", (request, response) => {
@@ -340,7 +380,7 @@ Database.create().then(database => {
         }
     })
 
-    app.delete("/api/user/logout", (requeest, response) => {
+    app.delete("/api/user/logout", (request, response) => {
         database.sessions.delete(response.locals.session.id).then(success => {
             response.sendStatus(success ? 200 : 401);
         });
