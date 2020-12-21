@@ -9,13 +9,13 @@ export class Tag{
     name:string
 
     @Column({type:"tinytext", nullable:true})
-    discription?:string
+    description?:string
 
     @ManyToOne(type=>User,user=>user.createdTags,{
         nullable:false,
         persistence:false
     })
-    readonly creator:User
+    creator:User
 
     @ManyToMany(type=>Problem,problem=>problem.tags,{
         persistence:false

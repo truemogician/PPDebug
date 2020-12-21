@@ -7,10 +7,10 @@ export function hasKeys(dst: object, ...keys: string[]): boolean {
     }
     return true;
 }
-type FullConstraint = [string, Function, boolean?];
-type PartialConstraint = [string, boolean?];
-export function hasKeysWithTypes(dst: object, ...keysAndTypes: FullConstraint[]): boolean;
-export function hasKeysWithTypes(dst: object, type: Function, ...keys: (PartialConstraint | string)[]): boolean;
+type TypeConstraint = [string, Function, boolean?];
+type PartialTypeConstraint = [string, boolean?];
+export function hasKeysWithTypes(dst: object, ...keysAndTypes: TypeConstraint[]): boolean;
+export function hasKeysWithTypes(dst: object, type: Function, ...keys: (PartialTypeConstraint | string)[]): boolean;
 export function hasKeysWithTypes(dst: object, ...params: any[]): boolean {
     const existedKeys = Object.keys(dst);
     if (params[0] instanceof Function) {
@@ -21,7 +21,7 @@ export function hasKeysWithTypes(dst: object, ...params: any[]): boolean {
                     return false;
             }
             else {
-                const key = params[i] as PartialConstraint;
+                const key = params[i] as PartialTypeConstraint;
                 if (existedKeys.includes(key[0])) {
                     if (dst[key[0]].constructor != type)
                         return false;
@@ -44,24 +44,57 @@ export function hasKeysWithTypes(dst: object, ...params: any[]): boolean {
         return true;
     }
 }
-export type Constraint = [string, Function, (boolean | RegExp)?, RegExp?];
-export function satisfyConstraints(obj: object, ...constraints: Constraint[]) {
+export type LengthConstraint = [number, number?];
+export type Constraint = Function | boolean | RegExp | LengthConstraint;
+export type KeyConstraint = [string, ...Constraint[]];
+class Restraint {
+    type:Function=String
+    nullable?: boolean
+    length?: LengthConstraint
+    pattern?: RegExp
+    assign(pConstraint: Constraint): void {
+        if (!pConstraint)
+            return;
+        if (typeof pConstraint == "boolean")
+            this.nullable = pConstraint;
+        else if (pConstraint instanceof RegExp)
+            this.pattern = pConstraint;
+        else if (pConstraint instanceof Function)
+            this.type=pConstraint;
+        else
+            this.length = pConstraint;
+    }
+}
+export function satisfyConstraints(obj: object, ...constraints: KeyConstraint[]): boolean {
     const keys = Object.keys(obj);
     for (const constraint of constraints) {
+        const restraint: Restraint = new Restraint();
+        restraint.assign(constraint[1]);
+        restraint.assign(constraint[2]);
+        restraint.assign(constraint[3]);
+        restraint.assign(constraint[4]);
         if (keys.includes(constraint[0])) {
-            const value = obj[constraint[0]];
-            if (value.constructor != constraint[1])
+            if (obj[constraint[0]].constructor != restraint.type)
                 return false;
-            else if (constraint[2]) {
-                if (constraint[2] instanceof RegExp &&
-                    !constraint[2].test(typeof value == "string" ? value : value.toString()))
-                    return false;
-                else if (constraint[3] &&
-                    !constraint[3].test(typeof value == "string" ? value : value.toString()))
-                    return false;
+            else if (restraint.pattern && !restraint.pattern.test(typeof obj[constraint[0]] == "string" ? obj[constraint[0]] : obj[constraint[0]].toString()))
+                return false;
+            else if (restraint.length) {
+                if (typeof obj[constraint[0]] == "string") {
+                    if (obj[constraint[0]].length < restraint.length[0])
+                        return false;
+                    else if (restraint.length[1] && obj[constraint[0]].length > restraint.length[1])
+                        return false;
+                }
+                else {
+                    const str = obj[constraint[0]].toString();
+                    if (str.length < restraint.length[0])
+                        return false;
+                    else if (restraint.length[1] && str.length > restraint.length[1])
+                        return false;
+                }
             }
         }
-        else if (constraint[2] !== true)
+        else if (!restraint.nullable)
             return false;
     }
     return true;

@@ -13,9 +13,12 @@ class SessionManager {
         this.connection = connection;
     }
     protected randomId(): string {
-        let result = "";
-        for (let i = 0; i < this.length; ++i)
-            result += this.charset.charAt(Math.floor(Math.random() * this.charset.length));
+        let result: string;
+        do {
+            result = "";
+            for (let i = 0; i < this.length; ++i)
+                result += this.charset.charAt(Math.floor(Math.random() * this.charset.length));
+        } while (result.length != this.length);
         return result;
     }
     async has(sessionId: string): Promise<boolean> {
@@ -24,27 +27,29 @@ class SessionManager {
     get(sessionId: string): Promise<Session> {
         return this.connection.manager.findOne(Session, sessionId, { relations: ["user"] });
     }
-    add(): Promise<Session>;
-    add(user: User): Promise<Session>;
-    async add(user?: User): Promise<Session> {
+    add(maxAge?: number): Promise<Session>;
+    add(user: User, maxAge?: number): Promise<Session>;
+    async add(param1?: User | number, param2?: number): Promise<Session> {
         let session = new Session();
-        session.maxAge = this.maxAge;
+        session.maxAge = typeof param1 == "number" ? param1 : (param2 != undefined ? param2 : this.maxAge);
+        const user = param1 instanceof User ? param1 : null;
         if (!user) {
             do {
                 session.id = this.randomId();
-            } while (await this.has(session.id) && session.id.length == this.length);
+            } while (await this.has(session.id));
         }
         else {
             if (user.session)
                 return null;
             do {
                 session.id = this.randomId()
-            } while (await this.has(session.id) && session.id.length == this.length);
+            } while (await this.has(session.id));
             session.user = user;
         }
         session.lastAccessDate = new Date();
-        this.connection.manager.save(Session, session);
-        return session;
+        return this.connection.manager.save(Session, session).then(session => {
+            return session; 
+        });
     }
     async update(session: Session): Promise<boolean> {
         if (await this.has(session.id)) {

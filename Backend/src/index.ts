@@ -12,16 +12,42 @@ import Mail = require('nodemailer/lib/mailer');
 import { Tag } from './entity/Tag';
 import { Session } from './entity/Session';
 
+declare global {
+    interface Array<T> {
+        select(this: any[], selector: (obj: T) => any): any[];
+        extract(this: T[], ...keys: string[]): T[];
+    }
+    interface Math {
+        randomBetween(min: number, max: number): number;
+    }
+}
+Array.prototype.extract = function <T>(this: T[], ...keys: string[]): any[] {
+    let result = [];
+    for (let i = 0; i < this.length; ++i) {
+        let current = {};
+        for (let j = 0; j < keys.length; ++j) {
+            let prop = keys[j].toString();
+            if (this[i].hasOwnProperty(prop))
+                current[prop] = this[i][prop];
+        }
+        result.push(current);
+    }
+    return result;
+};
+Array.prototype.select = function <T>(this: any[], selector: (obj: T) => any): any[] {
+    let result = [];
+    for (let i = 0; i < this.length; ++i)
+        result.push(selector(this[i]));
+    return result;
+};
 let int = Number.parseInt;
 Database.create().then(database => {
     const app: express.Application = express();
     const guestAvailabelUrl: string[] = [
-        "/user/hasUser",
-        "/user/login",
-        "/user/sendEmail",
-        "/user/register",
-
-        "/source/upload",
+        "/api/user/hasUser",
+        "/api/user/login",
+        "/api/user/sendEmail",
+        "/api/user/register"
     ];
 
     app.enable("trust proxy");
@@ -29,36 +55,35 @@ Database.create().then(database => {
     app.use("/api", cookieParser(), bodyParser.json(), async (request, response, next) => {
         console.log({
             time: new Date(),
-            ip: request.connection.remoteAddress,
+            url:request.url,
             path: request.path,
             params: request.query,
             payload: request.body,
             cookies: request.cookies,
         });
-        if (!request.cookies?.sessionId) {
+        async function createSession(): Promise<Session> {
             const session = await database.sessions.add();
-            response.cookie("sessionId", session.id);
             response.locals.session = session;
-            next();
+            response.cookie("sessionId", session.id);
+            return session;
         }
+        if (!request.cookies?.sessionId)
+            createSession().then(_ => next());
         else {
             const sessionId = request.cookies.sessionId;
             if (!await database.sessions.has(sessionId)) {
-                response.cookie("sessionId", (await database.sessions.add()).id);
-                response.status(401).send("sessionId doesn't exist");
+                await createSession();
+                request.path == "/user/login" ? next() : response.status(401).send("sessionId doesn't exist");
             }
             else {
                 database.sessions.get(sessionId).then(async session => {
                     if (session.expired()) {
                         database.sessions.delete(sessionId);
-                        const newSession = await database.sessions.add();
-                        response.cookie("sessionId", newSession.id);
-                        if (session.user)
+                        const newSession = await createSession();
+                        if (session.user && request.path != "/user/login")
                             response.status(401).send("Session expired");
-                        else {
-                            response.locals.session = newSession;
+                        else
                             next();
-                        }
                     }
                     else {
                         session.lastAccessDate = new Date();
@@ -69,8 +94,8 @@ Database.create().then(database => {
                 })
             }
         }
-    }, async (request, response, next) => {
-        if (guestAvailabelUrl.indexOf(request.path) == -1 && !response.locals.session?.user)
+    }, (request, response, next) => {
+        if (guestAvailabelUrl.indexOf("/api" + request.path) == -1 && !response.locals.session?.user)
             response.status(401).send("Login required");
         else
             next();
@@ -106,11 +131,14 @@ Database.create().then(database => {
             database.findOneByConditions(User, { email: query.email as string }).then(async user => {
                 if (!user)
                     response.status(403).send("Email not registered");
+                else if (user.session)
+                    response.status(400).send("User already logged in");
                 else {
-                    database.sessions.delete(response.locals.session.id);
-                    const session = await database.sessions.add(user);
-                    response.cookie("sessionId", session.id);
-                    response.status(200).send("Logged in successfully")
+                    response.locals.session.user = user;
+                    database.sessions.update(response.locals.session).then(success => {
+                        success ? response.status(200).send("Logged in successfully") :
+                            response.sendStatus(500);
+                    });
                 }
             })
         }
@@ -127,6 +155,29 @@ Database.create().then(database => {
         })
     })
 
+    app.get("/api/tag/getAll", (request, response) => {
+        database.getTable(Tag).find({select:["name"]}).then(tags => {
+            response.send(tags.select(tag=>tag.name));
+        }).catch(error => {
+            console.log(error);
+            response.sendStatus(500);
+        })
+    })
+
+    app.get("/api/tag/getDescriptions",(request,response)=>{
+        const params=request.query;
+        if (!satisfyConstraints(params,["names",Array]))
+            response.status(400).send("Parameter syntax error");
+        else{
+            database.getTable(Tag).findByIds(params.names as string[]).then(tags=>{
+                const map:object={};
+                for (let tag of tags)
+                    map[tag.name]=tag.description;
+                response.send(map);
+            })
+        }
+    })
+
     app.post("/api/user/sendEmail", async (request, response) => {
         const query = request.query;
         let metadata = response.locals.session.metadata;
@@ -136,8 +187,8 @@ Database.create().then(database => {
                 timeLeft: 60000 + metadata.mailTime - Date.now(),
             });
         else if (/^\S+@([a-zA-Z0-9]+\.)+[a-zA-Z]+$/.test(query.email as string)) {
-            if (await database.findOneByConditions(User,{ email: query.email as string }))
-                response.status(403).send("Email address already registered");
+            if (await database.findOneByConditions(User, { email: query.email as string }))
+                return response.status(403).send("Email address already registered");
             const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
             let verificationCode: string;
             do {
@@ -175,13 +226,13 @@ Database.create().then(database => {
     app.post("/api/user/register", (request, response) => {
         const payload = request.body;
         if (!satisfyConstraints(payload,
-            ["username", String, /^[a-z0-9_]{1,32}$/i],
-            ["password", String, /^.{1,32}$/],
-            ["email", String, /^\S+@[a-zA-Z0-9]+\.[a-zA-Z]+$/],
-            ["verificationCode", String, /^[a-z0-9]{4}$/i],
+            ["username", /^[a-z0-9_]$/i, [1, 32]],
+            ["password", [1, 32]],
+            ["email", /^\S+@[a-zA-Z0-9]+\.[a-zA-Z]+$/, [1, 64]],
+            ["verificationCode", /^[a-z0-9]{4}$/i],
             ["phone", Number, true, /^[0-9]{11}$/],
-            ["qq", String, true, /^[0-9]{6,12}$/]))
-            response.status(400).send("Syntax error");
+            ["qq", true, /^[0-9]$/, [6, 12]]))
+            response.status(400).send("Payload syntax error");
         else {
             const metadata = response.locals.session.metadata ? JSON.parse(response.locals.session.metadata) : {};
             if (metadata.mailTime && Date.now() > metadata.mailTime + 600000) {
@@ -219,8 +270,8 @@ Database.create().then(database => {
     app.post("/api/problem/create", async (request, response) => {
         const payload = request.body;
         if (!satisfyConstraints(payload,
-            ["title", String, /^.{16,256}$/],
-            ["description", String],
+            ["title", [1, 255]],
+            ["description", [1, 16777215]],
             ["tags", Array, true]))
             response.status(400).send("Payload syntax error");
         else {
@@ -230,12 +281,10 @@ Database.create().then(database => {
             newProblem.tags = await database.getTable(Tag).findByIds(payload.tags);
             newProblem.author = response.locals.session.user as User;
             database.getTable(Problem).save(newProblem).then(problem => {
-                if (problem)
-                    response.json({
-                        id: problem.id
-                    });
-                else
-                    response.sendStatus(500);
+                response.json({ id: problem.id });
+            }).catch(error => {
+                console.log(error);
+                response.status(500);
             })
         }
     });
@@ -247,10 +296,7 @@ Database.create().then(database => {
             else {
                 const params = request.query;
                 const payload = request.body;
-                if (!satisfyConstraints(payload,
-                    ["language", String],
-                    ["languageStandard", String, true],
-                    ["compiler", String]))
+                if (!satisfyConstraints(payload, ["language"], ["languageStandard", true], ["compiler"]))
                     response.status(400).send("Payload syntax error");
                 else {
                     let stream = fileSystem.createReadStream(request.file.path);
@@ -260,26 +306,51 @@ Database.create().then(database => {
         })
     })
 
+    app.post("/api/tag/create", (request, response) => {
+        const payload = request.body;
+        if (!satisfyConstraints(payload,
+            ["name", /^\S+$/i, [1, 16]],
+            ["description", true, [1, 255]]))
+            response.status(400).send("Payload syntax error");
+        else if (database.has(Tag, payload.name))
+            response.status(400).send("Tag already existed");
+        else {
+            const newTag = new Tag;
+            rightJoin(newTag, payload);
+            newTag.creator = response.locals.session.user;
+            database.getTable(Tag).save(newTag).then(() => {
+                response.sendStatus(200);
+            }).catch(error => {
+                console.log(error);
+                response.sendStatus(500);
+            });
+        }
+    })
+
     app.put("/api/user/modify", (request, response) => {
         const payload = request.body;
         if (!satisfyConstraints(payload,
-            ["username", String, true, /^[a-z0-9_]{1,32}$/i],
-            ["password", String, true, /^.{1,32}$/],
+            ["username", true, /^[a-z0-9_]$/i, [1, 32]],
+            ["password", true, [1, 32]],
             ["phone", Number, true, /^[0-9]{11}$/],
-            ["qq", String, true, /^[0-9]{6,12}$/],
-            ["gender", String, true, /^Male|Female|Other|Secret$/]))
-            response.status(400).send("Parameter syntax error");
+            ["qq", true, /^[0-9]$/, [6, 12]],
+            ["gender", true, /^Male|Female|Other|Secret$/]))
+            response.status(400).send("Payload syntax error");
         else {
             rightJoin(response.locals.session.user, payload);
-            database.getTable(User).save(response.locals.session.user as User).then(user => {
-                response.sendStatus(user ? 200 : 500);
+            database.getTable(User).save(response.locals.session.user as User).then(() => {
+                response.sendStatus(200);
+            }).catch(error => {
+                console.log(error);
+                response.sendStatus(500);
             });
         }
     })
 
     app.delete("/api/user/logout", (request, response) => {
+        response.cookie("sessionId", "");
         database.sessions.delete(response.locals.session.id).then(success => {
-            response.sendStatus(success ? 200 : 401);
+            response.sendStatus(success ? 200 : 500);
         });
     });
 
@@ -298,5 +369,5 @@ Database.create().then(database => {
             }
             console.log(`${count} expired sessions out of ${sessions.length} sessions have been cleared`);
         })
-    }, 60000)
+    }, 120000)
 })
