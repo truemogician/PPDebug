@@ -9,6 +9,8 @@ import { Problem } from './entity/Problem';
 import { hasKeys, leftJoin, rightJoin, satisfyConstraints } from './verification';
 import { MailTemplate, sourceUpload } from './configuration';
 import Mail = require('nodemailer/lib/mailer');
+import { Tag } from './entity/Tag';
+import { Session } from './entity/Session';
 
 let int = Number.parseInt;
 Database.create().then(database => {
@@ -101,11 +103,7 @@ Database.create().then(database => {
         if (!hasKeys(query, "email", "password"))
             response.status(400).send("Parameter(s) missing");
         else {
-            database.getTable(User).findOne({
-                where: {
-                    email: query.email as string
-                }
-            }).then(async user => {
+            database.findOneByConditions(User, { email: query.email as string }).then(async user => {
                 if (!user)
                     response.status(403).send("Email not registered");
                 else {
@@ -121,12 +119,9 @@ Database.create().then(database => {
     app.get("/api/user/getAvator", (request, response) => {
         const params = request.query;
         const userId = params.userId ?? response.locals.session.user.id;
-        database.getTable(User).findByIds([userId]).then(users => {
-            if (users && users[0]) {
-                response.json({
-                    avator: users[0].avator
-                });
-            }
+        database.findById(User, userId).then(user => {
+            if (user)
+                response.json({ avator: user[0].avator });
             else
                 response.status(400).send("User not found");
         })
@@ -141,7 +136,7 @@ Database.create().then(database => {
                 timeLeft: 60000 + metadata.mailTime - Date.now(),
             });
         else if (/^\S+@([a-zA-Z0-9]+\.)+[a-zA-Z]+$/.test(query.email as string)) {
-            if (await database.getTable(User).findOne({where: {email: query.email as string}}))
+            if (await database.findOneByConditions(User,{ email: query.email as string }))
                 response.status(403).send("Email address already registered");
             const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
             let verificationCode: string;
@@ -221,16 +216,18 @@ Database.create().then(database => {
         }
     });
 
-    app.post("/api/problem/create", (request, response) => {
+    app.post("/api/problem/create", async (request, response) => {
         const payload = request.body;
         if (!satisfyConstraints(payload,
             ["title", String, /^.{16,256}$/],
             ["description", String],
             ["tags", Array, true]))
-            response.status(400).send("Parameter syntax error");
+            response.status(400).send("Payload syntax error");
         else {
             let newProblem = new Problem();
-            leftJoin(newProblem, payload);
+            newProblem.title = payload.title;
+            newProblem.description = payload.description;
+            newProblem.tags = await database.getTable(Tag).findByIds(payload.tags);
             newProblem.author = response.locals.session.user as User;
             database.getTable(Problem).save(newProblem).then(problem => {
                 if (problem)
@@ -289,4 +286,17 @@ Database.create().then(database => {
     app.listen(19920, () => {
         console.log("App listening on 19920");
     });
+
+    const sessionCleaner = setInterval(() => {
+        database.getTable(Session).find().then(sessions => {
+            let count = 0;
+            for (const session of sessions) {
+                if (session.expired()) {
+                    database.sessions.delete(session.id);
+                    ++count;
+                }
+            }
+            console.log(`${count} expired sessions out of ${sessions.length} sessions have been cleared`);
+        })
+    }, 60000)
 })

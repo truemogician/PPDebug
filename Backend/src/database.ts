@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { Connection, createConnection, EntityTarget, Repository } from "typeorm";
+import { Connection, createConnection, EntityTarget, FindConditions, Repository } from "typeorm";
 import { User } from "./entity/User"
 import { Session } from "./entity/Session"
 
@@ -73,7 +73,21 @@ export default class Database {
         manager.sessions = new SessionManager(manager.connection);
         return manager;
     }
-    getTable<Entity>(target: EntityTarget<Entity>): Repository<Entity>{
+    getTable<Entity>(target: EntityTarget<Entity>): Repository<Entity> {
         return this.connection.getRepository(target);
+    }
+    async has<Entity>(entity: EntityTarget<Entity>, id: number | string): Promise<boolean> {
+        return this.connection.getRepository(entity).findOne(id).then(value => {
+            return value != undefined && value != null;
+        })
+    }
+    async findById<Entity>(entity: EntityTarget<Entity>, id: number | string): Promise<Entity> {
+        return this.connection.getRepository(entity).findOne(id);
+    }
+    async findByConditions<Entity>(entity: EntityTarget<Entity>, conditions: FindConditions<Entity>): Promise<Entity[]> {
+        return this.connection.getRepository(entity).find({ where: conditions });
+    }
+    async findOneByConditions<Entity>(entity: EntityTarget<Entity>, conditions: FindConditions<Entity>): Promise<Entity> {
+        return this.connection.getRepository(entity).findOne({ where: conditions });
     }
 }
