@@ -34,8 +34,8 @@ export class User {
     @Column({ type: "mediumtext", nullable: true })
     avator?: string;
 
-    @Column({ nullable: true })
-    phone?: number;
+    @Column({ length:11, nullable: true })
+    phone?: string;
 
     @Column({ length: 12, nullable: true })
     qq?: string;

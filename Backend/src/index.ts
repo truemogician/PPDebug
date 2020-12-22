@@ -55,7 +55,7 @@ Database.create().then(database => {
     app.use("/api", cookieParser(), bodyParser.json(), async (request, response, next) => {
         console.log({
             time: new Date(),
-            url:request.url,
+            url: request.url,
             path: request.path,
             params: request.query,
             payload: request.body,
@@ -146,33 +146,40 @@ Database.create().then(database => {
 
     app.get("/api/user/getAvator", (request, response) => {
         const params = request.query;
-        const userId = params.userId ?? response.locals.session.user.id;
+        const userId = params.userId ? int(params.userId as string) : response.locals.session.user.id;
         database.findById(User, userId).then(user => {
             if (user)
                 response.json({ avator: user[0].avator });
             else
                 response.status(400).send("User not found");
         })
+    });
+
+    app.get("/api/user/isAdministrator", (request, response) => {
+        database.findById(User, response.locals.session.user.id, ["administrator"]).then(user => {
+            user ? response.json({ isAdmin: user.administrator }) : response.sendStatus(500);
+        });
     })
 
     app.get("/api/tag/getAll", (request, response) => {
-        database.getTable(Tag).find({select:["name"]}).then(tags => {
-            response.send(tags.select(tag=>tag.name));
+        database.getTable(Tag).find({ select: ["name"] }).then(tags => {
+            response.send(tags.select(tag => tag.name));
         }).catch(error => {
             console.log(error);
             response.sendStatus(500);
         })
     })
 
-    app.get("/api/tag/getDescriptions",(request,response)=>{
-        const params=request.query;
-        if (!satisfyConstraints(params,["names",Array]))
-            response.status(400).send("Parameter syntax error");
-        else{
-            database.getTable(Tag).findByIds(params.names as string[]).then(tags=>{
-                const map:object={};
+    app.get("/api/tag/getDescriptions", (request, response) => {
+        const params = request.query;
+        const result = satisfyConstraints(params, ["names", Array]);
+        if (result !== true)
+            response.status(400).send(`${result[0]} : ${result[1]}`);
+        else {
+            database.getTable(Tag).findByIds(params.names as string[]).then(tags => {
+                const map: object = {};
                 for (let tag of tags)
-                    map[tag.name]=tag.description;
+                    map[tag.name] = tag.description;
                 response.send(map);
             })
         }
@@ -225,14 +232,15 @@ Database.create().then(database => {
 
     app.post("/api/user/register", (request, response) => {
         const payload = request.body;
-        if (!satisfyConstraints(payload,
+        const result = satisfyConstraints(payload,
             ["username", /^[a-z0-9_]$/i, [1, 32]],
             ["password", [1, 32]],
             ["email", /^\S+@[a-zA-Z0-9]+\.[a-zA-Z]+$/, [1, 64]],
             ["verificationCode", /^[a-z0-9]{4}$/i],
-            ["phone", Number, true, /^[0-9]{11}$/],
-            ["qq", true, /^[0-9]$/, [6, 12]]))
-            response.status(400).send("Payload syntax error");
+            ["phone", true, /^[0-9]{11}$/],
+            ["qq", true, /^[0-9]+$/, [6, 12]]);
+        if (result !== true)
+            response.status(400).send(`${result[0]} : ${result[1]}`);
         else {
             const metadata = response.locals.session.metadata ? JSON.parse(response.locals.session.metadata) : {};
             if (metadata.mailTime && Date.now() > metadata.mailTime + 600000) {
@@ -269,11 +277,12 @@ Database.create().then(database => {
 
     app.post("/api/problem/create", async (request, response) => {
         const payload = request.body;
-        if (!satisfyConstraints(payload,
+        const result = satisfyConstraints(payload,
             ["title", [1, 255]],
             ["description", [1, 16777215]],
-            ["tags", Array, true]))
-            response.status(400).send("Payload syntax error");
+            ["tags", Array, true]);
+        if (result !== true)
+            response.status(400).send(`${result[0]} : ${result[1]}`);
         else {
             let newProblem = new Problem();
             newProblem.title = payload.title;
@@ -296,8 +305,9 @@ Database.create().then(database => {
             else {
                 const params = request.query;
                 const payload = request.body;
-                if (!satisfyConstraints(payload, ["language"], ["languageStandard", true], ["compiler"]))
-                    response.status(400).send("Payload syntax error");
+                const result = satisfyConstraints(payload, ["language"], ["languageStandard", true], ["compiler"]);
+                if (result !== true)
+                    response.status(400).send(`${result[0]} : ${result[1]}`);
                 else {
                     let stream = fileSystem.createReadStream(request.file.path);
                     console.log(stream);
@@ -308,10 +318,11 @@ Database.create().then(database => {
 
     app.post("/api/tag/create", (request, response) => {
         const payload = request.body;
-        if (!satisfyConstraints(payload,
+        const result = satisfyConstraints(payload,
             ["name", /^\S+$/i, [1, 16]],
-            ["description", true, [1, 255]]))
-            response.status(400).send("Payload syntax error");
+            ["description", true, [1, 255]]);
+        if (result !== true)
+            response.status(400).send(`${result[0]} : ${result[1]}`);
         else if (database.has(Tag, payload.name))
             response.status(400).send("Tag already existed");
         else {
@@ -329,13 +340,14 @@ Database.create().then(database => {
 
     app.put("/api/user/modify", (request, response) => {
         const payload = request.body;
-        if (!satisfyConstraints(payload,
+        const result = satisfyConstraints(payload,
             ["username", true, /^[a-z0-9_]$/i, [1, 32]],
             ["password", true, [1, 32]],
-            ["phone", Number, true, /^[0-9]{11}$/],
-            ["qq", true, /^[0-9]$/, [6, 12]],
-            ["gender", true, /^Male|Female|Other|Secret$/]))
-            response.status(400).send("Payload syntax error");
+            ["phone", true, /^[0-9]{11}$/],
+            ["qq", true, /^[0-9]+$/, [6, 12]],
+            ["gender", true, /^Male|Female|Other|Secret$/]);
+        if (result !== true)
+            response.status(400).send(`${result[0]} : ${result[1]}`);
         else {
             rightJoin(response.locals.session.user, payload);
             database.getTable(User).save(response.locals.session.user as User).then(() => {

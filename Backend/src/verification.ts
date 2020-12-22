@@ -48,7 +48,7 @@ export type LengthConstraint = [number, number?];
 export type Constraint = Function | boolean | RegExp | LengthConstraint;
 export type KeyConstraint = [string, ...Constraint[]];
 class Restraint {
-    type:Function=String
+    type: Function = String
     nullable?: boolean
     length?: LengthConstraint
     pattern?: RegExp
@@ -60,14 +60,24 @@ class Restraint {
         else if (pConstraint instanceof RegExp)
             this.pattern = pConstraint;
         else if (pConstraint instanceof Function)
-            this.type=pConstraint;
+            this.type = pConstraint;
         else
             this.length = pConstraint;
     }
 }
-export function satisfyConstraints(obj: object, ...constraints: KeyConstraint[]): boolean {
+export enum FailureReason {
+    Type = "wrong type",
+    Omitted = "omitted",
+    Syntax = "syntax not matching pattern",
+    Long = "upper length limit exceeded",
+    Short = "lower length limit exceeded",
+    Redundant = "redundant"
+}
+export function satisfyConstraints(obj: object, ...constraints: KeyConstraint[]): boolean | [string, FailureReason] {
     const keys = Object.keys(obj);
+    const constraintKeys = new Array<string>();
     for (const constraint of constraints) {
+        constraintKeys.push(constraint[0]);
         const restraint: Restraint = new Restraint();
         restraint.assign(constraint[1]);
         restraint.assign(constraint[2]);
@@ -75,28 +85,31 @@ export function satisfyConstraints(obj: object, ...constraints: KeyConstraint[])
         restraint.assign(constraint[4]);
         if (keys.includes(constraint[0])) {
             if (obj[constraint[0]].constructor != restraint.type)
-                return false;
+                return [constraint[0],FailureReason.Type];
             else if (restraint.pattern && !restraint.pattern.test(typeof obj[constraint[0]] == "string" ? obj[constraint[0]] : obj[constraint[0]].toString()))
-                return false;
+                return [constraint[0],FailureReason.Syntax];
             else if (restraint.length) {
                 if (typeof obj[constraint[0]] == "string") {
                     if (obj[constraint[0]].length < restraint.length[0])
-                        return false;
+                        return [constraint[0],FailureReason.Short];
                     else if (restraint.length[1] && obj[constraint[0]].length > restraint.length[1])
-                        return false;
+                        return [constraint[0],FailureReason.Long];
                 }
                 else {
                     const str = obj[constraint[0]].toString();
                     if (str.length < restraint.length[0])
-                        return false;
+                        return [constraint[0],FailureReason.Short];
                     else if (restraint.length[1] && str.length > restraint.length[1])
-                        return false;
+                        return [constraint[0],FailureReason.Long];
                 }
             }
         }
         else if (!restraint.nullable)
-            return false;
+            return [constraint[0],FailureReason.Omitted];
     }
+    for (const key of keys)
+        if (!constraintKeys.includes(key))
+            return [key,FailureReason.Redundant];
     return true;
 }
 export function leftJoin(dst: object, target: object, typeSafe = true): void {
@@ -111,7 +124,7 @@ export function rightJoin(dst: object, target: object, typeSafe = true): void {
     const dstKeys = Object.keys(dst);
     const srcKeys = Object.keys(target);
     for (const key of srcKeys) {
-        if (!dstKeys.includes(key) || !typeSafe || dst[key].constructor == target[key].constructor)
+        if (!dstKeys.includes(key) || !typeSafe || !dst[key]?.constructor != target[key].constructor)
             dst[key] = clone(target[key]);
     }
 }

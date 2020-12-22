@@ -48,7 +48,7 @@ class SessionManager {
         }
         session.lastAccessDate = new Date();
         return this.connection.manager.save(Session, session).then(session => {
-            return session; 
+            return session;
         });
     }
     async update(session: Session): Promise<boolean> {
@@ -86,13 +86,16 @@ export default class Database {
             return value != undefined && value != null;
         })
     }
-    async findById<Entity>(entity: EntityTarget<Entity>, id: number | string): Promise<Entity> {
-        return this.connection.getRepository(entity).findOne(id);
+    async findById<Entity>(entity: EntityTarget<Entity>, id: number | string, select?: (keyof Entity)[]): Promise<Entity> {
+        return select ? this.connection.getRepository(entity).findOne(id, { select: select }) :
+            this.connection.getRepository(entity).findOne(id);
     }
-    async findByConditions<Entity>(entity: EntityTarget<Entity>, conditions: FindConditions<Entity>): Promise<Entity[]> {
-        return this.connection.getRepository(entity).find({ where: conditions });
+    async findByConditions<Entity>(entity: EntityTarget<Entity>, conditions: FindConditions<Entity>, select?: (keyof Entity)[]): Promise<Entity[]> {
+        return select ? this.connection.getRepository(entity).find({ where: conditions, select: select }) :
+            this.connection.getRepository(entity).find({ where: conditions });
     }
-    async findOneByConditions<Entity>(entity: EntityTarget<Entity>, conditions: FindConditions<Entity>): Promise<Entity> {
-        return this.connection.getRepository(entity).findOne({ where: conditions });
+    async findOneByConditions<Entity>(entity: EntityTarget<Entity>, conditions: FindConditions<Entity>, select?: (keyof Entity)[]): Promise<Entity> {
+        return select ? this.connection.getRepository(entity).findOne({ where: conditions, select: select }) :
+            this.connection.getRepository(entity).findOne({ where: conditions });
     }
 }
