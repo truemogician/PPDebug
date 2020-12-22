@@ -6,5 +6,5 @@ tmp/
 temp/
 test.*
 grammar.*
-*.html
 *.png
+upload/

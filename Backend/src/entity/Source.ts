@@ -7,10 +7,14 @@ import { SourceRevision } from "./Revision"
 import { User } from "./User"
 
 export enum SourceType {
-    Datamaker, StandardProgram, JudgedProgram, SpecialJudger
+    Datamaker = "Datamaker",
+    Standard = "Standard",
+    Judged = "Judged",
+    Judger = "Judger"
 }
 export enum SourceLanguage {
-    C, Cpp
+    C,
+    Cpp
 }
 
 @Entity()
@@ -64,7 +68,7 @@ export class Source {
     @ManyToOne(type => Problem, problem => problem.sources, {
         persistence: false,
     })
-    readonly problem?: Problem
+    problem?: Problem
 
     @ManyToMany(type => Judgement, judgement => judgement.sources, {
         persistence: false,

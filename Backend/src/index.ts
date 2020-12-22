@@ -11,6 +11,8 @@ import { MailTemplate, sourceUpload } from "./configuration";
 import Mail = require("nodemailer/lib/mailer");
 import { Tag } from "./entity/Tag";
 import { Session } from "./entity/Session";
+import { Source } from "./entity/Source";
+import { Code } from "./entity/Code";
 
 declare global {
     interface Array<T> {
@@ -47,7 +49,6 @@ class API {
             if (error) throw error;
             else {
                 const json = JSON.parse(data);
-                console.log(json);
                 this.restrictions = new Map(Object.entries(json) as [string, APIRestraintTuple][]);
             }
         });
@@ -66,13 +67,14 @@ class API {
     };
 }
 const APIs = new API();
+
 Database.create().then((database) => {
     const app: express.Application = express();
 
     app.enable("trust proxy");
 
     app.use(cookieParser(), bodyParser.json(), (request, response, next) => next());
-
+    //API existence
     app.use("/api", (request, response, next) => {
         if (!APIs.has("/api" + request.path)) response.status(400).send("API not supported");
         else next();
@@ -342,22 +344,49 @@ Database.create().then((database) => {
         }
     });
 
-    app.post("/api/source/upload", (request, response) => {
+    app.post("/api/source/upload", bodyParser.urlencoded(), (request, response) => {
         sourceUpload.single("source")(request, response, (error) => {
-            if (error) response.status(500).send("Uploading failed for unknown reason");
+            if (error) {
+                console.log(error);
+                response.status(500).send("Uploading failed for unknown reason");
+            }
             else {
-                const params = request.query;
-                const payload = request.body;
-                const result = satisfyConstraints(
-                    payload,
+                const params=request.query;
+                let result=satisfyConstraints(params,["problemId",true]);
+                if (result!==true)
+                    return response.status(400).send(`${result[0]} : ${result[1]}`);
+                const formdata = request.body;
+                result = satisfyConstraints(
+                    formdata,
+                    ["type", /^Datamaker|Standard|Judged|Judger$/],
                     ["language"],
-                    ["languageStandard", true],
-                    ["compiler"]
-                );
-                if (result !== true) response.status(400).send(`${result[0]} : ${result[1]}`);
+                    ["compiler"],
+                    ["languageStandard", true]
+                )
+                if (result !== true)
+                    response.status(400).send(`${result[0]} : ${result[1]}`);
                 else {
-                    let stream = fileSystem.createReadStream(request.file.path);
-                    console.log(stream);
+                    fileSystem.readFile(request.file.path, async (error, data) => {
+                        if (error)
+                            response.status(500).send("File reading error");
+                        else {
+                            const newSource = new Source();
+                            rightJoin(newSource, formdata);
+                            const newCode = new Code();
+                            newCode.code = data.toString();
+                            fileSystem.unlink(request.file.path,(error)=>console.log(error));
+                            newSource.code = newCode;
+                            if (params.problemId)
+                                newSource.problem = await database.findById(Problem,int(params.problemId as string))
+                            newSource.author = response.locals.session.user;
+                            database.getTable(Source).save(newSource).then(source => {
+                                response.json({ id: source.id });
+                            }).catch(error => {
+                                console.log(error);
+                                response.status(500).send("Unknown error occurred when saving file to database");
+                            })
+                        }
+                    })
                 }
             }
         });
@@ -422,9 +451,7 @@ Database.create().then((database) => {
         });
     });
 
-    app.listen(19920, () => {
-        console.log("App listening on 19920");
-    });
+    app.listen(19920, () => console.log("App listening on 19920"));
 
     const sessionCleaner = setInterval(() => {
         database
