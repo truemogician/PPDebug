@@ -12,6 +12,6 @@ export class Code {
     @JoinColumn()
     source: Source
 
-    @Column("mediumtext")
-    code: string
+    @Column("mediumblob")
+    code: Buffer
 }

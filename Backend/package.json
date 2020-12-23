@@ -36,6 +36,6 @@
    "scripts": {
       "build": "tsc --build",
       "start": "ts-node src/index.ts",
-      "test": "ts-node test.ts"
+      "test": "ts-node test/test.ts"
    }
 }

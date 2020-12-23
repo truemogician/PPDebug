@@ -7,7 +7,7 @@ import Image = require("Jimp");
 import Zlib = require("zlib");
 import Mail = require("nodemailer/lib/mailer");
 import Database from "./database";
-import { hasKeys, rightJoin, verifyRequest } from "./verification";
+import { hasKeys, rightJoin as rightAssign, verifyRequest } from "./verification";
 import { MailTemplate, upload } from "./configuration";
 import { User } from "./entity/User";
 import { Problem } from "./entity/Problem";
@@ -15,6 +15,7 @@ import { Tag } from "./entity/Tag";
 import { Session } from "./entity/Session";
 import { Source, SourceType } from "./entity/Source";
 import { Code } from "./entity/Code";
+import { Language } from "./entity/Language";
 
 declare global {
     interface Array<T> {
@@ -252,9 +253,8 @@ Database.create().then((database) => {
     });
 
     app.get("/api/user/hasDropped", (request, response) => {
-        if (!verifyRequest("Parameter", request, response, ["userId"]))
-            return;
-        database.findById(User, request.query.userId as string, ["dropDate"]).then((user) => {
+        if (!verifyRequest("Parameter", request, response, ["userId"])) return;
+        database.findById(User, request.query.userId as string, ["id", "dropDate"]).then((user) => {
             user ? response.json({ dropDate: user.dropDate }) : response.sendStatus(500);
         });
     });
@@ -344,7 +344,7 @@ Database.create().then((database) => {
         const sourceId = int(request.query.id as string);
         database.getTable(Source).findOne(sourceId, {
             select: ["type", "language", "compiler", "voteUp", "voteDown"],
-            relations: ["author", "contributors", "problem"]
+            relations: ["author", "problem", "contributors"]
         }).then(source => {
             if (!source)
                 return response.status(404).send("Source doesn't exist");
@@ -355,9 +355,14 @@ Database.create().then((database) => {
                 compiler: source.compiler,
                 voteCount: source.voteUp - source.voteDown,
                 authorId: source.author.id,
-                contributorsId: source.contributors?.select(contributor => contributor.id),
-                problemId: source.problem?.id
-            })
+                contributorsId: source.contributors.length
+                    ? source.contributors.select(contributor => contributor.id)
+                    : undefined,
+                problemId: source.problem?.id,
+            });
+        }).catch(error => {
+            console.log(error);
+            response.sendStatus(500);
         })
     });
 
@@ -373,6 +378,18 @@ Database.create().then((database) => {
             });
         })
     });
+
+    app.get("/api/language/getAll", (request, response) => {
+        database.getTable(Language).find().then(languages => {
+            response.send(languages.map((language => {
+                return {
+                    name: language.name,
+                    standards: language._standards ? language.standards : null,
+                    compilers: language.compilers
+                }
+            })))
+        })
+    })
 
     app.post("/api/user/sendEmail", async (request, response) => {
         const query = request.query;
@@ -498,7 +515,7 @@ Database.create().then((database) => {
             filename: (file: Express.Multer.File) =>
                 `${user.id}-${Date.now()}-${file.originalname}`,
             sizeLimit: 131072,
-        }).single("source")(request, response, (error: any) => {
+        }).single("source")(request, response, async (error: any) => {
             if (error) {
                 console.log(error);
                 response.status(500).send("Uploading failed for unknown reason");
@@ -512,14 +529,32 @@ Database.create().then((database) => {
                         ["languageStandard", true]
                     )) return;
                 const params = request.query, formdata = request.body;
+                const languages = await database.getTable(Language).find();
+                let language: Language = null;
+                for (const lan of languages) {
+                    if (
+                        lan.name == (formdata.language as string) &&
+                        lan.compilers.includes(formdata.compiler) &&
+                        (lan._standards
+                            ? lan.standards.includes(formdata.languageStandard)
+                            : formdata.languageStandard == null)
+                    ) {
+                        language = lan;
+                        break;
+                    }
+                }
+                if (!language)
+                    return response.status(400).send("Language or standard or compiler not supported");
                 FileSystem.readFile(request.file.path, async (error, data) => {
                     if (error) response.status(500).send("File reading error");
                     else {
                         const newSource = new Source();
-                        rightJoin(newSource, formdata);
+                        rightAssign(newSource, formdata);
+                        newSource.language = language;
                         const newCode = new Code();
-                        newCode.code = Zlib.deflateSync(data).toString();
-                        FileSystem.unlink(request.file.path, (error) => console.log(error));
+                        newCode.code = Zlib.deflateSync(data);
+                        console.log("Compression rate : " + (1 - newCode.code.length / data.length));
+                        FileSystem.unlink(request.file.path, error => error ? console.log(error) : null);
                         newSource.code = newCode;
                         if (params.problemId)
                             newSource.problem = await database.findById(
@@ -530,16 +565,10 @@ Database.create().then((database) => {
                         database
                             .getTable(Source)
                             .save(newSource)
-                            .then((source) => {
-                                response.json({ id: source.id });
-                            })
-                            .catch((error) => {
+                            .then(source => response.json({ id: source.id }))
+                            .catch(error => {
                                 console.log(error);
-                                response
-                                    .status(500)
-                                    .send(
-                                        "Unknown error occurred when saving file to database"
-                                    );
+                                response.status(500).send("Unknown error occurred when saving file to database");
                             });
                     }
                 });
@@ -557,7 +586,7 @@ Database.create().then((database) => {
         if (database.has(Tag, payload.name)) response.status(400).send("Tag already existed");
         else {
             const newTag = new Tag();
-            rightJoin(newTag, payload);
+            rightAssign(newTag, payload);
             newTag.creator = response.locals.session.user;
             database
                 .getTable(Tag)
@@ -582,7 +611,7 @@ Database.create().then((database) => {
             ["gender", true, /^Male|Female|Other|Secret$/]
         )) return;
         const payload = request.body;
-        rightJoin(response.locals.session.user, payload);
+        rightAssign(response.locals.session.user, payload);
         database
             .getTable(User)
             .save(response.locals.session.user as User)
@@ -656,9 +685,8 @@ Database.create().then((database) => {
                         ++count;
                     }
                 }
-                console.log(
-                    `${count} expired sessions out of ${sessions.length} sessions have been cleared`
-                );
+                if (count)
+                    console.log(`${count} / ${sessions.length} session(s) have been cleared`);
             });
     }, 120000);
 });

@@ -1,7 +1,8 @@
-import { Column, Entity, JoinColumn, ManyToMany, ManyToOne, OneToMany, OneToOne, PrimaryGeneratedColumn } from "typeorm"
+import { Column, Entity, JoinColumn, JoinTable, ManyToMany, ManyToOne, OneToMany, OneToOne, PrimaryGeneratedColumn } from "typeorm"
 import { Code } from "./Code"
 import { SourceComment } from "./Comment"
 import { Judgement } from "./Judgement"
+import { Language } from "./Language"
 import { Problem } from "./Problem"
 import { SourceRevision } from "./Revision"
 import { User } from "./User"
@@ -12,10 +13,6 @@ export enum SourceType {
     Judged = "Judged",
     Judger = "Judger"
 }
-export enum SourceLanguage {
-    C,
-    Cpp
-}
 
 @Entity()
 export class Source {
@@ -25,8 +22,12 @@ export class Source {
     @Column({ type: "enum", enum: SourceType })
     type: SourceType
 
-    @Column({ type: "enum", enum: SourceLanguage })
-    language: SourceLanguage
+    @ManyToOne(type=>Language,language=>language.sources,{
+        nullable:false,
+        eager:true,
+        persistence:false
+    })
+    language:Language
 
     @Column({ type: "tinytext", nullable: true })
     languageStandard?: string
@@ -63,6 +64,7 @@ export class Source {
     @ManyToMany(type => User, user => user.contributedSources, {
         persistence: false
     })
+    @JoinTable({name:"problem_contributor"})
     readonly contributors?: User[]
 
     @ManyToOne(type => Problem, problem => problem.sources, {

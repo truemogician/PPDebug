@@ -17,6 +17,7 @@
     "/api/judgement/getStatus": [false, 1],
     "/api/source/getSource": [false, 1],
     "/api/source/getCode": [false, 1],
+    "/api/language/getAll": [false,1],
     "/api/user/sendEmail": [true],
     "/api/user/register": [true],
     "/api/problem/create": [false, 1],
