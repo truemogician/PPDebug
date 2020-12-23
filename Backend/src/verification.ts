@@ -1,3 +1,4 @@
+import { Request, Response } from 'express';
 import clone = require('lodash.clonedeep');
 export function hasKeys(dst: object, ...keys: string[]): boolean {
     const existedKeys = Object.keys(dst);
@@ -85,32 +86,42 @@ export function satisfyConstraints(obj: object, ...constraints: KeyConstraint[])
         restraint.assign(constraint[4]);
         if (keys.includes(constraint[0])) {
             if (obj[constraint[0]].constructor != restraint.type)
-                return [constraint[0],FailureReason.Type];
+                return [constraint[0], FailureReason.Type];
             else if (restraint.pattern && !restraint.pattern.test(typeof obj[constraint[0]] == "string" ? obj[constraint[0]] : obj[constraint[0]].toString()))
-                return [constraint[0],FailureReason.Syntax];
+                return [constraint[0], FailureReason.Syntax];
             else if (restraint.length) {
                 if (typeof obj[constraint[0]] == "string") {
                     if (obj[constraint[0]].length < restraint.length[0])
-                        return [constraint[0],FailureReason.Short];
+                        return [constraint[0], FailureReason.Short];
                     else if (restraint.length[1] && obj[constraint[0]].length > restraint.length[1])
-                        return [constraint[0],FailureReason.Long];
+                        return [constraint[0], FailureReason.Long];
                 }
                 else {
                     const str = obj[constraint[0]].toString();
                     if (str.length < restraint.length[0])
-                        return [constraint[0],FailureReason.Short];
+                        return [constraint[0], FailureReason.Short];
                     else if (restraint.length[1] && str.length > restraint.length[1])
-                        return [constraint[0],FailureReason.Long];
+                        return [constraint[0], FailureReason.Long];
                 }
             }
         }
         else if (!restraint.nullable)
-            return [constraint[0],FailureReason.Omitted];
+            return [constraint[0], FailureReason.Omitted];
     }
     for (const key of keys)
         if (!constraintKeys.includes(key))
-            return [key,FailureReason.Redundant];
+            return [key, FailureReason.Redundant];
     return true;
+}
+export function verifyRequest(type: "Parameter" | "Payload", request: Request, response: Response, ...constraints: KeyConstraint[]): boolean {
+    const verified=type=="Parameter"?request.query:request.body;
+    const result=satisfyConstraints(verified,...constraints);
+    if (result===true)
+        return true;
+    else{
+        response.status(400).send(`${result[0]} : ${result[1]}`);
+        return false;
+    }
 }
 export function leftJoin(dst: object, target: object, typeSafe = true): void {
     const dstKeys = Object.keys(dst);

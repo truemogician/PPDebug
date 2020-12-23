@@ -32,7 +32,7 @@ export class User {
     email: string;
 
     @Column({ type: "mediumtext", nullable: true })
-    avator?: string;
+    avatar?: string;
 
     @Column({ length:11, nullable: true })
     phone?: string;

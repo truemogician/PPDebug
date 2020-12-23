@@ -1,22 +1,24 @@
 import express = require("express");
 import cookieParser = require("cookie-parser");
 import bodyParser = require("body-parser");
-import fileSystem = require("fs");
 import nodemailer = require("nodemailer");
+import FileSystem = require("fs");
+import Image = require("Jimp");
+import Zlib = require("zlib");
+import Mail = require("nodemailer/lib/mailer");
 import Database from "./database";
+import { hasKeys, rightJoin, verifyRequest } from "./verification";
+import { MailTemplate, upload } from "./configuration";
 import { User } from "./entity/User";
 import { Problem } from "./entity/Problem";
-import { hasKeys, rightJoin, satisfyConstraints } from "./verification";
-import { MailTemplate, sourceUpload } from "./configuration";
-import Mail = require("nodemailer/lib/mailer");
 import { Tag } from "./entity/Tag";
 import { Session } from "./entity/Session";
-import { Source } from "./entity/Source";
+import { Source, SourceType } from "./entity/Source";
 import { Code } from "./entity/Code";
 
 declare global {
     interface Array<T> {
-        select(this: any[], selector: (obj: T) => any): any[];
+        select<R>(this: any[], selector: (obj: T) => R, skipNull?: boolean): R[];
         extract(this: T[], ...keys: string[]): T[];
     }
     interface Math {
@@ -35,9 +37,13 @@ Array.prototype.extract = function <T>(this: T[], ...keys: string[]): any[] {
     }
     return result;
 };
-Array.prototype.select = function <T>(this: any[], selector: (obj: T) => any): any[] {
-    let result = [];
-    for (let i = 0; i < this.length; ++i) result.push(selector(this[i]));
+Array.prototype.select = function <T, R>(this: any[], selector: (obj: T) => R, skipNull = false): R[] {
+    let result = new Array<R>();
+    for (let i = 0; i < this.length; ++i) {
+        const selected = selector(this[i]);
+        if ((selected != null && selected != undefined) || !skipNull)
+            result.push(selected);
+    }
     return result;
 };
 let int = Number.parseInt;
@@ -45,7 +51,7 @@ type APIRestraintTuple = [boolean, number?];
 class API {
     private restrictions: Map<string, APIRestraintTuple>;
     constructor(configFile?: string) {
-        fileSystem.readFile(configFile ?? "api.json", "utf8", (error, data) => {
+        FileSystem.readFile(configFile ?? "api.json", "utf8", (error, data) => {
             if (error) throw error;
             else {
                 const json = JSON.parse(data);
@@ -164,16 +170,80 @@ Database.create().then((database) => {
         }
     });
 
-    app.get("/api/user/getAvator", (request, response) => {
-        const params = request.query;
-        const userId = params.userId
-            ? int(params.userId as string)
+    app.get("/api/user/getAvatar", (request, response) => {
+        if (!verifyRequest("Parameter", request, response, ["userId", true]))
+            return;
+        const userId = request.query.userId
+            ? int(request.query.userId as string)
             : response.locals.session.user.id;
         database.findById(User, userId).then((user) => {
-            if (user) response.json({ avator: user[0].avator });
+            if (user) {
+                response.json({
+                    avatar: user.avatar
+                        ? Zlib.inflateSync(user.avatar).toString()
+                        : null
+                });
+            }
             else response.status(400).send("User not found");
         });
     });
+
+    app.get("/api/user/getRawAvatar", (request, response) => {
+        if (!verifyRequest("Parameter", request, response, ["userId", true]))
+            return;
+        const userId = request.query.userId
+            ? int(request.query.userId as string)
+            : response.locals.session.user.id;
+        database.findById(User, userId).then(user => {
+            if (user) {
+                let avatar = null;
+                FileSystem.readdir("../Resource/Upload/Avatar", (error, files) => {
+                    if (error) {
+                        console.log(error);
+                        response.status(500).send("Unknown error occurred when reading folder");
+                    }
+                    else {
+                        for (const file of files) {
+                            if (user.id.toString() == file.substr(0, file.lastIndexOf("."))) {
+                                avatar = `${request.hostname}/resource/avatar/${file}`;
+                                break;
+                            }
+                        }
+                    }
+                })
+                response.json({ avatar: avatar });
+            }
+            else response.status(400).send("User not found");
+        });
+    });
+
+    app.get("/api/user/getInformation", (request, response) => {
+        if (!verifyRequest(
+            "Parameter", request, response,
+            ["avatar", true, /^true|false$/],
+            ["phone", true, /^true|false$/],
+            ["qq", true, /^true|false$/],
+            ["gender", true, /^true|false$/],
+        )) return;
+        const params = request.query;
+        const userId = response.locals.session.user.id;
+        database.findById(User, userId).then(user => {
+            if (!user)
+                return response.status(404).send("User doesn't exist");
+            response.json({
+                id: userId,
+                username: user.username,
+                administrator: user.administrator,
+                email: user.email,
+                reputation: user.reputation,
+                joinDate: user.joinDate,
+                avatar: params.avatar ? (user.avatar ? Zlib.inflateSync(user.avatar) : null) : null,
+                phone: params.phone ? user.phone : null,
+                qq: params.qq ? user.qq : null,
+                gender: params.gender ? user.gender : null
+            })
+        })
+    })
 
     app.get("/api/user/isAdministrator", (request, response) => {
         database.findById(User, response.locals.session.user.id, ["administrator"]).then((user) => {
@@ -182,13 +252,11 @@ Database.create().then((database) => {
     });
 
     app.get("/api/user/hasDropped", (request, response) => {
-        const params = request.query;
-        const result = satisfyConstraints(params, ["userId"]);
-        if (result !== true) response.status(400).send(`${result[0]} : ${result[1]}`);
-        else
-            database.findById(User, params.userId as string, ["dropDate"]).then((user) => {
-                user ? response.json({ dropDate: user.dropDate }) : response.sendStatus(500);
-            });
+        if (!verifyRequest("Parameter", request, response, ["userId"]))
+            return;
+        database.findById(User, request.query.userId as string, ["dropDate"]).then((user) => {
+            user ? response.json({ dropDate: user.dropDate }) : response.sendStatus(500);
+        });
     });
 
     app.get("/api/tag/getAll", (request, response) => {
@@ -205,19 +273,105 @@ Database.create().then((database) => {
     });
 
     app.get("/api/tag/getDescriptions", (request, response) => {
-        const params = request.query;
-        const result = satisfyConstraints(params, ["names", Array]);
-        if (result !== true) response.status(400).send(`${result[0]} : ${result[1]}`);
-        else {
-            database
-                .getTable(Tag)
-                .findByIds(params.names as string[])
-                .then((tags) => {
-                    const map: object = {};
-                    for (let tag of tags) map[tag.name] = tag.description;
-                    response.send(map);
-                });
-        }
+        if (!verifyRequest("Parameter", request, response, ["names", Array]))
+            return;
+        database
+            .getTable(Tag)
+            .findByIds(request.query.names as string[])
+            .then((tags) => {
+                const map: object = {};
+                for (let tag of tags) map[tag.name] = tag.description;
+                response.send(map);
+            });
+    });
+
+    app.get("/api/problem/getProblems", (request, response) => {
+        if (!verifyRequest(
+            "Parameter", request, response,
+            ["skip", true, /^[0-9]+$/],
+            ["count", true, /^[0-9]+$/]
+        )) return;
+        const params = {
+            skip: request.query.skip ? int(request.query.skip as string) : 0,
+            count: request.query.count ? int(request.query.count as string) : 10
+        };
+        database.getTable(Problem).find({
+            skip: params.skip,
+            take: params.count,
+            select: ["id", "title", "author", "voteUp", "voteDown"],
+            relations: ["tags", "author"]
+        }).then(problems => {
+            response.send(problems.map(problem => {
+                return {
+                    id: problem.id,
+                    title: problem.title,
+                    tags: problem.tags?.select(tag => tag.name),
+                    authorId: problem.author.id,
+                    voteCount: problem.voteUp - problem.voteDown
+                }
+            }))
+        })
+    });
+
+    app.get("/api/problem/getDetail", (request, response) => {
+        if (!verifyRequest("Parameter", request, response, ["id", /^[0-9]+$/]))
+            return;
+        const problemId = int(request.query.id as string);
+        database.getTable(Problem).findOne(problemId, {
+            select: ["title", "description", "voteUp", "voteDown"],
+            relations: ["tags", "contributors", "sources"]
+        }).then(problem => {
+            if (!problem)
+                return response.status(404).send("Problem doesn't exist");
+            response.json({
+                id: problemId,
+                title: problem.title,
+                description: problem.description,
+                tags: problem.tags?.select(tag => tag.name),
+                authorId: problem.author.id,
+                contributorsId: problem.contributors?.select(contributor => contributor.id),
+                voteCount: problem.voteUp - problem.voteDown,
+                datamakersId: problem.sources?.select(source => source.type == SourceType.Datamaker ? source.id : null, true),
+                standardsId: problem.sources?.select(source => source.type == SourceType.Standard ? source.id : null, true),
+                judgersId: problem.sources?.select(source => source.type == SourceType.Judger ? source.id : null, true),
+            });
+        })
+    });
+
+    app.get("/api/source/getSource", (request, response) => {
+        if (!verifyRequest("Parameter", request, response, ["id", /^[0-9]+$/]))
+            return;
+        const sourceId = int(request.query.id as string);
+        database.getTable(Source).findOne(sourceId, {
+            select: ["type", "language", "compiler", "voteUp", "voteDown"],
+            relations: ["author", "contributors", "problem"]
+        }).then(source => {
+            if (!source)
+                return response.status(404).send("Source doesn't exist");
+            response.json({
+                id: sourceId,
+                type: source.type,
+                language: source.language,
+                compiler: source.compiler,
+                voteCount: source.voteUp - source.voteDown,
+                authorId: source.author.id,
+                contributorsId: source.contributors?.select(contributor => contributor.id),
+                problemId: source.problem?.id
+            })
+        })
+    });
+
+    app.get("/api/source/getCode", (request, response) => {
+        if (!verifyRequest("Parameter", request, response, ["id", /^[0-9]+$/]))
+            return;
+        const sourceId = int(request.query.id as string);
+        database.findById(Code, sourceId).then(code => {
+            if (!code)
+                return response.status(404).send("Code doesn't exist");
+            response.json({
+                code: Zlib.inflateSync(code.code).toString()
+            });
+        })
     });
 
     app.post("/api/user/sendEmail", async (request, response) => {
@@ -267,140 +421,140 @@ Database.create().then((database) => {
     });
 
     app.post("/api/user/register", (request, response) => {
-        const payload = request.body;
-        const result = satisfyConstraints(
-            payload,
+        if (!verifyRequest(
+            "Payload", request, response,
             ["username", /^[a-z0-9_]$/i, [1, 32]],
             ["password", [1, 32]],
             ["email", /^\S+@[a-zA-Z0-9]+\.[a-zA-Z]+$/, [1, 64]],
             ["verificationCode", /^[a-z0-9]{4}$/i],
             ["phone", true, /^[0-9]{11}$/],
             ["qq", true, /^[0-9]+$/, [6, 12]]
-        );
-        if (result !== true) response.status(400).send(`${result[0]} : ${result[1]}`);
+        )) return;
+        const metadata = response.locals.session.metadata
+            ? JSON.parse(response.locals.session.metadata)
+            : {};
+        if (metadata.mailTime && Date.now() > metadata.mailTime + 600000) {
+            delete metadata.verificationCode;
+            delete metadata.mailTime;
+            response.locals.session.metadata = JSON.stringify(metadata);
+            database.sessions.update(response.locals.session);
+            response.status(403).send("Verification code expired");
+        } else if (response.locals.session.user)
+            response.status(400).send("User already logged in");
+        else if (!metadata.verificationCode)
+            response.status(400).send("Verification email not sent");
+        else if (metadata.verificationCode != request.body.verificationCode)
+            response.status(403).send("Wrong verification code");
         else {
-            const metadata = response.locals.session.metadata
-                ? JSON.parse(response.locals.session.metadata)
-                : {};
-            if (metadata.mailTime && Date.now() > metadata.mailTime + 600000) {
-                delete metadata.verificationCode;
-                delete metadata.mailTime;
-                response.locals.session.metadata = JSON.stringify(metadata);
-                database.sessions.update(response.locals.session);
-                response.status(403).send("Verification code expired");
-            } else if (response.locals.session.user)
-                response.status(400).send("User already logged in");
-            else if (!metadata.verificationCode)
-                response.status(400).send("Verification email not sent");
-            else if (metadata.verificationCode != payload.verificationCode)
-                response.status(403).send("Wrong verification code");
-            else {
-                const newUser = new User();
-                newUser.username = payload.username;
-                newUser.password = payload.password;
-                newUser.email = payload.email;
-                database
-                    .getTable(User)
-                    .save(newUser)
-                    .then((user) => {
-                        delete metadata.verificationCode;
-                        delete metadata.mailTime;
-                        response.locals.session.user = user;
-                        response.locals.session.metadata = JSON.stringify(metadata);
-                        database.sessions.update(response.locals.session);
-                        response.status(201).json({
-                            id: user.id,
-                        });
-                    });
-            }
-        }
-    });
-
-    app.post("/api/problem/create", async (request, response) => {
-        const payload = request.body;
-        const result = satisfyConstraints(
-            payload,
-            ["title", [1, 255]],
-            ["description", [1, 16777215]],
-            ["tags", Array, true]
-        );
-        if (result !== true) response.status(400).send(`${result[0]} : ${result[1]}`);
-        else {
-            let newProblem = new Problem();
-            newProblem.title = payload.title;
-            newProblem.description = payload.description;
-            newProblem.tags = await database.getTable(Tag).findByIds(payload.tags);
-            newProblem.author = response.locals.session.user as User;
+            const newUser = new User();
+            newUser.username = request.body.username;
+            newUser.password = request.body.password;
+            newUser.email = request.body.email;
             database
-                .getTable(Problem)
-                .save(newProblem)
-                .then((problem) => {
-                    response.json({ id: problem.id });
-                })
-                .catch((error) => {
-                    console.log(error);
-                    response.status(500);
+                .getTable(User)
+                .save(newUser)
+                .then((user) => {
+                    delete metadata.verificationCode;
+                    delete metadata.mailTime;
+                    response.locals.session.user = user;
+                    response.locals.session.metadata = JSON.stringify(metadata);
+                    database.sessions.update(response.locals.session);
+                    response.status(201).json({
+                        id: user.id,
+                    });
                 });
         }
     });
 
+    app.post("/api/problem/create", async (request, response) => {
+        if (!verifyRequest(
+            "Payload", request, response,
+            ["title", [1, 255]],
+            ["description", [1, 16777215]],
+            ["tags", Array, true]
+        )) return;
+        const payload = request.body;
+        let newProblem = new Problem();
+        newProblem.title = payload.title;
+        newProblem.description = payload.description;
+        newProblem.tags = await database.getTable(Tag).findByIds(payload.tags);
+        newProblem.author = response.locals.session.user as User;
+        database
+            .getTable(Problem)
+            .save(newProblem)
+            .then((problem) => {
+                response.json({ id: problem.id });
+            })
+            .catch((error) => {
+                console.log(error);
+                response.status(500);
+            });
+    });
+
     app.post("/api/source/upload", bodyParser.urlencoded(), (request, response) => {
-        sourceUpload.single("source")(request, response, (error) => {
+        const user = response.locals.session.user;
+        upload({
+            location: "../Resource/Upload/Temp",
+            filename: (file: Express.Multer.File) =>
+                `${user.id}-${Date.now()}-${file.originalname}`,
+            sizeLimit: 131072,
+        }).single("source")(request, response, (error: any) => {
             if (error) {
                 console.log(error);
                 response.status(500).send("Uploading failed for unknown reason");
-            }
-            else {
-                const params=request.query;
-                let result=satisfyConstraints(params,["problemId",true]);
-                if (result!==true)
-                    return response.status(400).send(`${result[0]} : ${result[1]}`);
-                const formdata = request.body;
-                result = satisfyConstraints(
-                    formdata,
-                    ["type", /^Datamaker|Standard|Judged|Judger$/],
-                    ["language"],
-                    ["compiler"],
-                    ["languageStandard", true]
-                )
-                if (result !== true)
-                    response.status(400).send(`${result[0]} : ${result[1]}`);
-                else {
-                    fileSystem.readFile(request.file.path, async (error, data) => {
-                        if (error)
-                            response.status(500).send("File reading error");
-                        else {
-                            const newSource = new Source();
-                            rightJoin(newSource, formdata);
-                            const newCode = new Code();
-                            newCode.code = data.toString();
-                            fileSystem.unlink(request.file.path,(error)=>console.log(error));
-                            newSource.code = newCode;
-                            if (params.problemId)
-                                newSource.problem = await database.findById(Problem,int(params.problemId as string))
-                            newSource.author = response.locals.session.user;
-                            database.getTable(Source).save(newSource).then(source => {
+            } else {
+                if (!verifyRequest("Parameter", request, response, ["problemId", true]) ||
+                    !verifyRequest(
+                        "Payload", request, response,
+                        ["type", /^Datamaker|Standard|Judged|Judger$/],
+                        ["language"],
+                        ["compiler"],
+                        ["languageStandard", true]
+                    )) return;
+                const params = request.query, formdata = request.body;
+                FileSystem.readFile(request.file.path, async (error, data) => {
+                    if (error) response.status(500).send("File reading error");
+                    else {
+                        const newSource = new Source();
+                        rightJoin(newSource, formdata);
+                        const newCode = new Code();
+                        newCode.code = Zlib.deflateSync(data).toString();
+                        FileSystem.unlink(request.file.path, (error) => console.log(error));
+                        newSource.code = newCode;
+                        if (params.problemId)
+                            newSource.problem = await database.findById(
+                                Problem,
+                                int(params.problemId as string)
+                            );
+                        newSource.author = response.locals.session.user;
+                        database
+                            .getTable(Source)
+                            .save(newSource)
+                            .then((source) => {
                                 response.json({ id: source.id });
-                            }).catch(error => {
-                                console.log(error);
-                                response.status(500).send("Unknown error occurred when saving file to database");
                             })
-                        }
-                    })
-                }
+                            .catch((error) => {
+                                console.log(error);
+                                response
+                                    .status(500)
+                                    .send(
+                                        "Unknown error occurred when saving file to database"
+                                    );
+                            });
+                    }
+                });
             }
         });
     });
 
     app.post("/api/tag/create", (request, response) => {
-        const payload = request.body;
-        const result = satisfyConstraints(
-            payload,
+        if (!verifyRequest(
+            "Payload", request, response,
             ["name", /^\S+$/i, [1, 16]],
             ["description", true, [1, 255]]
-        );
-        if (result !== true) response.status(400).send(`${result[0]} : ${result[1]}`);
-        else if (database.has(Tag, payload.name)) response.status(400).send("Tag already existed");
+        )) return;
+        const payload = request.body;
+        if (database.has(Tag, payload.name)) response.status(400).send("Tag already existed");
         else {
             const newTag = new Tag();
             rightJoin(newTag, payload);
@@ -419,29 +573,66 @@ Database.create().then((database) => {
     });
 
     app.put("/api/user/modify", (request, response) => {
-        const payload = request.body;
-        const result = satisfyConstraints(
-            payload,
+        if (!verifyRequest(
+            "Payload", request, response,
             ["username", true, /^[a-z0-9_]$/i, [1, 32]],
             ["password", true, [1, 32]],
             ["phone", true, /^[0-9]{11}$/],
             ["qq", true, /^[0-9]+$/, [6, 12]],
             ["gender", true, /^Male|Female|Other|Secret$/]
-        );
-        if (result !== true) response.status(400).send(`${result[0]} : ${result[1]}`);
-        else {
-            rightJoin(response.locals.session.user, payload);
-            database
-                .getTable(User)
-                .save(response.locals.session.user as User)
-                .then(() => {
-                    response.sendStatus(200);
-                })
-                .catch((error) => {
-                    console.log(error);
-                    response.sendStatus(500);
+        )) return;
+        const payload = request.body;
+        rightJoin(response.locals.session.user, payload);
+        database
+            .getTable(User)
+            .save(response.locals.session.user as User)
+            .then(() => {
+                response.sendStatus(200);
+            })
+            .catch((error) => {
+                console.log(error);
+                response.sendStatus(500);
+            });
+    });
+
+    app.put("/api/user/uploadAvatar", (request, response) => {
+        const user = response.locals.session.user as User;
+        upload({
+            location: "../Resource/Upload/Avatar",
+            filename: (file: Express.Multer.File) => {
+                const extension = file.originalname.split(".")[-1];
+                return user.id + "." + extension;
+            },
+            sizeLimit: 2097152,
+        }).single("avatar")(request, response, (error: any) => {
+            if (error) {
+                console.log(error);
+                response.status(500).send("Uploading failed for unknown reason");
+            } else {
+                Image.read(request.file.path).then((image) => {
+                    image.resize(256, 256);
+                    image.getBase64Async(image.getExtension()).then((base64) => {
+                        Zlib.deflate(base64, (error, result) => {
+                            if (error)
+                                response.status(500).send("Compression failed for unknown reason");
+                            else {
+                                user.avatar = result.toString();
+                                database
+                                    .getTable(User)
+                                    .save(user)
+                                    .then(() => {
+                                        response.sendStatus(200);
+                                    })
+                                    .catch((error) => {
+                                        console.log(error);
+                                        response.sendStatus(500);
+                                    });
+                            }
+                        });
+                    });
                 });
-        }
+            }
+        });
     });
 
     app.delete("/api/user/logout", (request, response) => {

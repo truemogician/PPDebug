@@ -1,5 +1,5 @@
 import multer = require("multer")
-import fileSystem = require("fs")
+import FileSystem = require("fs")
 import { parse as parseHtml } from "node-html-parser"
 import SMTPTransport = require("nodemailer/lib/smtp-transport")
 export class MailTemplate {
@@ -14,29 +14,37 @@ export class MailTemplate {
     }
     content: string
     constructor(target: string, verificationCode: string) {
-        const html = parseHtml(fileSystem.readFileSync("email.html", "utf8").toString());
+        const html = parseHtml(FileSystem.readFileSync("email.html", "utf8").toString());
         html.querySelector("#target").set_content(target);
         html.querySelector("#verificationCode").set_content(verificationCode);
         this.content = html.toString();
     }
 }
-export const sourceUpload = multer({
-    storage: multer.diskStorage({
-        destination: (_req, _file, cb) => cb(null, "upload/source"),
-        filename: (_req, file, cb) => cb(null, file.originalname + '-' + Date.now())
-    }),
-    limits: {
-        fileSize: 524288,
-        files: 1,
-    }
-})
-export const avatorUpload = multer({
-    storage: multer.diskStorage({
-        destination: (_req, _file, cb) => cb(null, "upload/avator"),
-        filename: (_req, file, cb) => cb(null, file.fieldname + '-' + Date.now())
-    }),
-    limits: {
-        fileSize: 2097152,
-        files: 1,
-    },
-})
+interface UploadConfig {
+    location: string | ((file: Express.Multer.File) => string)
+    filename: string | ((file: Express.Multer.File) => string)
+    sizeLimit: number
+    countLimit?: number
+}
+export function upload(config: UploadConfig) {
+    return multer({
+        storage: multer.diskStorage({
+            destination: (_req, file, callback) => {
+                const location = typeof config.location == "string"
+                    ? config.location
+                    : config.location(file);
+                callback(null, location);
+            },
+            filename: (_req, file, callback) => {
+                const filename = typeof config.filename == "string"
+                    ? config.filename
+                    : config.filename(file);
+                callback(null, filename);
+            }
+        }),
+        limits: {
+            fileSize: config.sizeLimit,
+            files: config.countLimit ?? 1,
+        }
+    })
+}
