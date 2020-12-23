@@ -2,9 +2,9 @@
    "type": "mysql",
    "host": "rm-bp169vb6t6qq13ksr2o.mysql.rds.aliyuncs.com",
    "port": 3306,
-   "username": "true_mogician",
-   "password": "qscaxzProject_Database=0",
-   "database": "compare_judger",
+   "username": "secret",
+   "password": "secret",
+   "database": "secret",
    "synchronize": true,
    "logging": false,
    "entities": [
